@@ -1,0 +1,6 @@
+flysystem_objective.autocomplete:
+  path: '/flysystem_objective/autocomplete'
+  defaults:
+    _controller: '\Drupal\flysystem_objective\Controller\DefaultController::autocomplete'
+  requirements:
+    _permission: 'access content'

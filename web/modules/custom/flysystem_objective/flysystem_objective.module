@@ -1,0 +1,270 @@
+<?php
+use \Drupal\file\Entity\File;
+use \Drupal\Core\Url;
+use \Drupal\Core\Form\FormStateInterface;
+use Drupal\imce\Imce as imce;
+use Drupal\Core\Render\Element;
+use Drupal\Component\Utility\UrlHelper;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Symfony\Component\HttpFoundation\Request;
+//use Drupal\autocomplete_list;
+/**
+* Implements hook_page_attachments().
+*/
+
+function flysystem_objective_page_attachments(array &$attachments) {
+// $attachments['#attached']['library'][] = 'flysystem_objective/extra.admin';
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter() for editor_link_dialog form.
+ */
+function flysystem_objective_form_editor_link_dialog_alter(&$form, \Drupal\Core\Form\FormStateInterface $form_state, $form_id) {
+
+    //imce_process_url_element($form['attributes']['href'], 'link');
+}
+
+function flysystem_objective_form_alter(&$form, \Drupal\Core\Form\FormStateInterface $form_state, $form_id) {
+    if('editor_link_dialog' == $form_id){
+        $form['attributes']['href']['#autocomplete_route_name'] = 'flysystem_objective.autocomplete';
+        $form['#validate'][] = 'linkValidateForm';
+
+    }
+ if('imce_profile_edit_form' == $form_id){
+     $user =  \Drupal::currentUser();
+     $scheme = file_default_scheme();
+     $profile = imce::userProfile($user, $scheme);
+     $form['conf']['objective_select'] = [
+         '#type' => 'checkbox',
+         '#title' => t('Enable Objective scan for the field'),
+         '#attributes' => [
+             //define static name and id so we can easier select it
+           //   'id' => 'select-objective-scanner',
+             'name' => 'field_select_objective_scanner',
+         ],
+         '#return_value' => 'checked',
+     //    '#default_value' => $profile->getConf('objective_select'),         // Default to unchecked
+     ];
+
+     $form['conf']['scanner'] = [
+         '#type' => 'textfield',
+         '#size' => '60',
+         '#placeholder' => 'Enter scanner link',
+         '#attributes' => [
+             'id' => 'objective-scanner',
+         ],
+         '#default_value' => $profile->getConf('scanner'),
+         '#states' => [
+             //show this textfield only if the radio 'other' is selected above
+             'visible' => [
+                 ':input[name="field_select_objective_scanner"]' => ['checked' => true],
+             ],
+         ],
+     ];
+ }
+
+    if (isset($form['field_obj_text'])){
+     foreach( $form['field_obj_text']['widget'] as $delta => $fields) {
+             if (is_int($delta)) {
+                 $form['field_obj_text']['widget'][$delta]['value']['#autocomplete_route_name'] = 'flysystem_objective.autocomplete';
+                 $form['field_obj_text']['widget'][$delta]['#description'] = t('Link');
+                 $form['field_obj_text']['widget'][$delta]['value']['#attributes'] = array('placeholder'=>array('Type here'));
+                 $field_suffix = '';
+                 if(isset($form['field_obj_text']['widget'][$delta]['value']['#default_value'])){
+                     $default = $form['field_obj_text']['widget'][$delta]['value']['#default_value'];
+                     $display_title = getStringsBetween($default,'(',')');
+                     if(isset($display_title[0])) {
+                         $search = array('(', ')');
+                         $final_title = str_replace($display_title[0], '',$default );
+                         $form['field_obj_text']['widget'][$delta]['value']['#default_value'] = $final_title;
+                         $field_suffix = str_replace($search, '',$display_title[0]);
+                     }
+                 }
+                 $form['field_obj_text']['widget'][$delta]['field_suffix'] = array(
+                     '#type' => 'textfield',
+                     '#title' => t("Name"),
+                     '#maxlength' => 128,
+                    '#weight' => 50,
+                     '#default_value' => $field_suffix,
+                    '#attributes' =>array(
+                     'class' => array(
+                         'form-control',
+                     )
+                )
+              );
+             }
+     }
+        $form['#validate'][] = 'titleValidateForm';
+ }
+}
+
+function flysystem_objective_preprocess_file_link(&$variables){
+    $file = $variables['file'];
+    $file_entity = $file instanceof File ? $file : File::load($file->fid);
+    $options = array();
+    $url = file_create_url($file_entity->getFileUri());
+    $uri_parts = parse_url($url);
+    if (strpos($url, '_flysystem') !== false) {
+        $schemes =  \Drupal\Core\Site\Settings::get('flysystem');
+        if(is_array($schemes)){
+            foreach($schemes as $key => $scheme){
+                if($scheme['driver'] == 'objective' && strpos($file_entity->getFileUri(), $key) !== false){
+                    $base = '/_flysystem/'.file_default_scheme();
+                    $id = normalizeTargetPath($uri_parts['path']);
+                    $uri_parts['path'] =  $base.$id;
+                    $link_text = $file->getFilename();
+                    $link_text = preg_replace( '~\(.*\)~' , "", $link_text );
+                    $url = $uri_parts['scheme'].'://'.$uri_parts['host']. $uri_parts['path'];
+                    $variables['link'] = \Drupal::l($link_text, Url::fromUri($url, $options));
+                }
+            }
+        }
+    }
+}
+
+function flysystem_objective_preprocess_field(&$vars) {
+    $fn = $vars['element']['#field_name'];
+    switch ($fn) {
+        case 'field_obj_text':
+            $objdriver ='';
+            $fileref ='';
+            $schemes =  \Drupal\Core\Site\Settings::get('flysystem');
+            if(is_array($schemes)) {
+                foreach($schemes as $driver => $scheme){
+                    if($scheme['driver'] == 'objective'){
+                        $objdriver = $driver;
+                    }
+                }
+            foreach ($vars['items'] as $key => $item) {
+                    $title = $vars['items'][$key]['content']['#title']['#context']['value'];
+                    $id = getStringsBetween($title);
+
+                    if(isset($id[0])){
+                       $search = array('<','>');
+                       $fileref = str_replace($search,'', $id[0]);
+                       $title = str_replace($id[0], '', $title);
+                        $host = \Drupal::request()->getSchemeAndHttpHost();
+                        $ext = '';
+                        $class = '';
+                        $ext = pathinfo($title, PATHINFO_EXTENSION);
+                        $file_path = $host.'/_flysystem/'.$objdriver.'/'.$fileref.'.'.$ext;
+                        $url = Url::fromUri($file_path);
+                        $vars['items'][$key]['content']['#url'] =  $url;
+
+                        $display_title = getStringsBetween($title,'(',')');
+                        if(isset($display_title[0])) {
+                            $search = array('(', ')');
+                            $final_title = str_replace($search, '', $display_title[0]);
+                            $vars['items'][$key]['content']['#title']['#context']['value'] = $final_title;
+                        }else{
+                            $vars['items'][$key]['content']['#title']['#context']['value'] = $title;
+                        }
+
+                        if($ext) {
+                            $class = 'file--mime-application-' . strtolower($ext);
+                        }
+                        $item['attributes']->setAttribute('class', $class);
+                    }
+
+                }
+            }
+            break;
+    }
+}
+
+function normalizeTargetPath(string $path): string
+{
+
+    $current_path = explode("/", $path);
+    if(is_array($current_path)){
+        $path = '/'.end($current_path);
+    }
+    $path = trim($path, '/');
+
+    return ($path === '') ? '' : '/' . $path;
+}
+
+/**
+ * Implements hook_field_widget_form_alter().
+ */
+function flysystem_objective_field_widget_form_alter(&$element, FormStateInterface &$form_state, $context) {
+
+    if (get_class($context['widget']) === 'Drupal\link\Plugin\Field\FieldWidget\LinkWidget' && !empty($context['form']['#attributes'])) {
+        $description = $element['#description'];
+        unset($element['#description']);
+        $element['title']['#description'] = $description;
+        return;
+    }
+
+}
+
+function getStringsBetween($str, $start='<', $end='>', $with_from_to=true){
+    $arr = [];
+    $last_pos = 0;
+    $last_pos = strpos($str, $start, $last_pos);
+    while ($last_pos !== false) {
+        $t = strpos($str, $end, $last_pos);
+        $arr[] = ($with_from_to ? $start : '').substr($str, $last_pos + 1, $t - $last_pos - 1).($with_from_to ? $end : '');
+        $last_pos = strpos($str, $start, $last_pos+1);
+    }
+    return $arr;
+}
+
+function linkValidateForm(array &$form, FormStateInterface $form_state) {
+
+    $show_error = function($form_state, \Exception $e) {
+        $form_state->setErrorByName('attributes', $this->t('Failed to save URL. The server reports the following message: <p class="error">!message</p>', array(
+            '!message' => $e->getMessage(),
+        )));
+    };
+    $attr = $form_state->getValue('attributes');
+    $parsed_url = UrlHelper::parse($attr['href']);
+    $objdriver ='';
+    $fileref ='';
+    $schemes =  \Drupal\Core\Site\Settings::get('flysystem');
+    if(is_array($schemes)) {
+        foreach ($schemes as $driver => $scheme) {
+            if ($scheme['driver'] == 'objective') {
+                $objdriver = $driver;
+            }
+        }
+    }
+    $path = $parsed_url['path'];
+    $id = getStringsBetween($path);
+    if(isset($id[0])){
+        $search = array('<','>');
+        $fileref = str_replace($search,'', $id[0]);
+        $title = str_replace($id[0], '', $path);
+        $host = \Drupal::request()->getSchemeAndHttpHost();
+        $ext = '';
+        $class = '';
+        $ext = pathinfo($path, PATHINFO_EXTENSION);
+        $file_path = $host.'/_flysystem/'.$objdriver.'/'.$fileref.'.'.$ext;
+        if($ext) {
+            $class = 'file--mime-application-' . strtolower($ext);
+        }
+    }
+    $class = $class.' obj-link';
+    $form_state->setValue(['attributes', 'href'],$file_path);
+    $form_state->setValue(['attributes', 'class'],$class);
+
+}
+function titleValidateForm(array &$form, FormStateInterface $form_state) {
+
+    $show_error = function($form_state, \Exception $e) {
+        $form_state->setErrorByName('attributes', $this->t('Failed to save URL. The server reports the following message: <p class="error">!message</p>', array(
+            '!message' => $e->getMessage(),
+        )));
+    };
+    $objLinks = $form_state->getValue('field_obj_text');
+    $new_obj = array();
+    if (is_array($objLinks) && !empty($objLinks)) {
+        foreach ($objLinks as $delta => $value) {
+            if (is_int($delta) && !empty($value['field_suffix']) && !empty($value['value'])) {
+                $value['value'] = '('.$value['field_suffix'].')'.$value['value'];
+            }
+            $new_obj[$delta] = $value;
+        }
+        $form_state->setValue('field_obj_text', $new_obj);
+    }
+}

@@ -1,0 +1,7 @@
+extra.admin:
+  css:
+   theme:
+    css/extra.admin.css: {}
+  js:
+    js/plugins/objective/objective.info.js: {}
+  drupalSettings: {}

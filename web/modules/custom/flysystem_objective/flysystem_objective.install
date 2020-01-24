@@ -1,0 +1,30 @@
+<?php
+function flysystem_objective_schema(){
+    $schema['objective_files'] = array(
+        'description' => 'The table for storing files reference.',
+        'fields' => array(
+            'id' => array(
+                'description' => 'The primary identifier for the files.',
+                'type' => 'serial',
+                'not null' => TRUE,
+                'unsigned' => TRUE,
+            ),
+            'fid' => array(
+                'description' => 'File Id from file managed table',
+                'type' => 'int',
+                'length' => 10,
+                'not null' => TRUE,
+                'default' => 0,
+            ),
+            'status' => array(
+                'description' => 'File status(1=Unblock,0=Block).',
+                'type' => 'int',
+                'length' => 1,
+                'not null' => TRUE,
+                'default' => 1,
+            ),
+        ),
+        'primary key' => array('id'),
+    );
+    return $schema;
+}

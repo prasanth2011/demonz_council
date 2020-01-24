@@ -1,0 +1,4 @@
+add filebrowser files:
+ title: 'Add filebrowser files'
+ description: 'A custom permission to add files from filebrowser.'
+ restrict access: TRUE
